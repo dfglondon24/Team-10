@@ -4,6 +4,7 @@ import webbrowser
 import plotly.graph_objects as go
 from dash import dcc, html
 from dash.dependencies import Input, Output, State
+from sklearn.cluster import KMeans
 from sklearn.linear_model import LassoCV
 import statsmodels.api as sm
 from sklearn.metrics import mean_squared_error, r2_score
@@ -73,7 +74,7 @@ app.layout = html.Div([
         id='analysis-type',
         options=[
             {'label': 'Linear Regression', 'value': 'linear'},
-            {'label': 'PCA', 'value': 'pca'},{'label': 'Lasso', 'value': 'lasso'},
+            {'label': 'PCA', 'value': 'pca'},{'label': 'Lasso', 'value': 'lasso'},{'label': 'K-Means', 'value': 'kmeans'},
         ],
         value='linear'  # Default value
     ),
@@ -86,7 +87,8 @@ app.layout = html.Div([
         data=df.to_dict('records'),
         sort_action='native',  # Enables sorting on column headers
         sort_mode='multi',  # Allows sorting by multiple columns
-        page_size=10  # Display 10 rows per page
+        page_size=10,  # Display 10 rows per page
+        filter_action='native',
     ),
 
 
@@ -326,6 +328,30 @@ def run_analysis(n_clicks, analysis_type, selected_feature,y_selector):
                 columns=[{"name": i, "id": i} for i in coef_df.columns],
                 data=coef_df.to_dict('records'),
                 style_table={'width': '50%', 'margin': 'auto'},
+                style_header={'fontWeight': 'bold'},
+                style_cell={'textAlign': 'center'}
+            )
+        ])
+    if analysis_type == 'kmeans':
+        # Set number of clusters (you can adjust this to be dynamic if you like)
+        n_clusters = 3  # Set this to the number of clusters you want
+        kmeans = KMeans(n_clusters=n_clusters, random_state=42)
+        kmeans.fit(X_normalized)
+
+        # Create a DataFrame with the original data and cluster labels
+        cluster_df = pd.DataFrame(X_processed, columns=X_processed.columns)
+        cluster_df['Cluster'] = kmeans.labels_
+
+        # Create a scatter plot to visualize the clusters (using first two selected features)
+        fig = px.scatter(cluster_df, x=cluster_df.columns[0], y=cluster_df.columns[1], color='Cluster')
+
+        return html.Div([
+            html.H3(f"K-Means Clustering with {n_clusters} Clusters", style={'textAlign': 'center'}),
+            dcc.Graph(figure=fig),
+            dash_table.DataTable(
+                columns=[{"name": i, "id": i} for i in cluster_df.columns],
+                data=cluster_df.to_dict('records'),
+                style_table={'width': '80%', 'margin': 'auto'},
                 style_header={'fontWeight': 'bold'},
                 style_cell={'textAlign': 'center'}
             )
