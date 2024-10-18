@@ -62,7 +62,7 @@ app.layout = html.Div([
         id='multi-feature-selector',
         options=[{'label': col, 'value': col} for col in df.columns],
         multi=True,
-        value=df.columns[0]  # Default to first two columns
+        value=[k for k in df.columns if "Score" in k] # Default to first two columns
     ),html.H2("Selection of Y for Linear Regression",style={'textAlign': 'center'}),
     dcc.Dropdown(
         id='y-selector',
@@ -80,7 +80,7 @@ app.layout = html.Div([
     # Analysis output area,
 # Button to trigger the analysis
     html.Button('Run Analysis', id='run-analysis', n_clicks=0,style={'textAlign': 'center'}),
-    html.Div(id='analysis-output',style={'textAlign': 'center'}),dash_table.DataTable(
+    html.Div(id='analysis-output'),dash_table.DataTable(
         id='table',
         columns=[{'name': col, 'id': col} for col in df.columns],
         data=df.to_dict('records'),
@@ -122,12 +122,23 @@ def update_graph_correl(multi_feature):
     # Calculate the correlation matrix
     corr_matrix = processed_features.corr()
 
+    # Generate hover text with index and column names
+    hover_text = [
+        [f'Index: {corr_matrix.index[i]}<br>Column: {corr_matrix.columns[j]}<br>Value: {corr_matrix.iloc[i, j]:.2f}'
+         for j in range(len(corr_matrix.columns))]
+        for i in range(len(corr_matrix.index))]
+
     # Create heatmap using Plotly
     fig = go.Figure(data=go.Heatmap(
         z=corr_matrix.values,
+        x=corr_matrix.columns,
+        y=corr_matrix.index,
+        hoverinfo='text',
+        text=hover_text,
         colorscale='Viridis'
     ))
 
+    # Update layout
     fig.update_layout(
         title="Correlation Matrix (with One-Hot Encoding)",
         xaxis_title="Features",
@@ -243,22 +254,32 @@ def run_analysis(n_clicks, analysis_type, selected_feature,y_selector):
         # Perform Linear Regression using statsmodels
         model = sm.OLS(y, X_with_const)
         results = model.fit()
+        scales = scaler.scale_  # This gives the standard deviations of the original features
+
+        # Unnormalize the coefficients (excluding the intercept)
+        unnormalized_coefficients = results.params[1:] / scales
+
+        # The intercept doesn't change, so keep it the same
+        unnormalized_intercept = results.params[0]
+
+        # Create a new DataFrame for the unnormalized coefficients
         coef_df = pd.DataFrame({
-            'columns names': ['const']+ X_processed.columns.tolist(),
-            'coefficients': results.params,
-            'standard_errors': results.bse,
-            't_values': results.tvalues,
-            'p_values': results.pvalues,
-            'conf_lower': results.conf_int()[0],
-            'conf_upper': results.conf_int()[1]
-        })
+    'columns names': ['const'] + X_processed.columns.tolist(),
+    'coefficients': [round(unnormalized_intercept, 2)] + [round(c, 2) for c in unnormalized_coefficients],
+    'standard_errors': [round(se, 2) for se in results.bse],
+    't_values': [round(t, 2) for t in results.tvalues],
+    'p_values': [round(p, 2) for p in results.pvalues],
+    'conf_lower': [round(cl, 2) for cl in results.conf_int()[0]],
+    'conf_upper': [round(cu, 2) for cu in results.conf_int()[1]]
+    }).sort_values("p_values",ascending=True)
+
         # Display the table of regression stats using Dash DataTable
         return html.Div([html.H3(f"R2 is : {results.rsquared} and f pvalue of the model : {results.f_pvalue}",style={'textAlign': 'center'}),dash_table.DataTable(
             columns=[{"name": i, "id": i} for i in coef_df.columns],
             data=coef_df.to_dict('records'),
             style_table={'width': '50%', 'margin': 'auto'},
             style_header={'fontWeight': 'bold'},
-            style_cell={'textAlign': 'center'}
+            style_cell={'textAlign': 'flex'}
         )])
     elif analysis_type == 'lasso':
 
@@ -274,16 +295,33 @@ def run_analysis(n_clicks, analysis_type, selected_feature,y_selector):
         # Get coefficients, including the intercept
         coefficients = np.append(lasso_cv.intercept_, lasso_cv.coef_)
 
-        # Create DataFrame for the LassoCV results
+        # Assuming scaler is StandardScaler or similar
+        scales = scaler.scale_  # This gives the standard deviations of the original features
+
+        # Unnormalize the Lasso coefficients (excluding the intercept)
+        unnormalized_coefficients = lasso_cv.coef_ / scales
+
+        # The intercept doesn't change, so keep it the same
+        unnormalized_intercept = lasso_cv.intercept_
+
+        # Combine the unnormalized intercept and coefficients
+        coefficients_unnormalized = np.append(unnormalized_intercept, unnormalized_coefficients)
+
+        # Create a DataFrame for the unnormalized coefficients
         coef_df = pd.DataFrame({
             'columns names': ['Intercept'] + X_processed.columns.tolist(),
-            'coefficients': coefficients
+            'coefficients': coefficients_unnormalized
         })
 
-        # Display results
+        # Sort the DataFrame by the absolute value of the coefficients in descending order
+        coef_df['abs_coefficients'] = coef_df['coefficients'].abs()
+        coef_df = coef_df.sort_values(by='abs_coefficients', ascending=False).drop(columns='abs_coefficients')
+
+        # Display the unnormalized and sorted table of LassoCV results
         return html.Div([
-            html.H3(f"Optimal alpha: {lasso_cv.alpha_} | R²: {lasso_cv.score(X_normalized, y_aligned)}",
-                    style={'textAlign': 'center'}),
+            html.H3(
+                f"Optimal alpha: {round(lasso_cv.alpha_, 2)} | R²: {round(lasso_cv.score(X_normalized, y_aligned), 2)}",
+                style={'textAlign': 'center'}),
             dash_table.DataTable(
                 columns=[{"name": i, "id": i} for i in coef_df.columns],
                 data=coef_df.to_dict('records'),
