@@ -88,7 +88,7 @@ app.layout = html.Div([
         sort_action='native',  # Enables sorting on column headers
         sort_mode='multi',  # Allows sorting by multiple columns
         page_size=10,  # Display 10 rows per page
-        filter_action='native',
+            filter_action='native',
     ),
 
 
@@ -162,7 +162,9 @@ def update_graph(plot_type, selected_feature,selected_feature2):
     elif plot_type == 'line':
         fig = px.line(df, x=x, y=y)
     elif plot_type == 'bar':
-        fig = px.bar(df, x=x, y=y)
+        count_df = df[x].value_counts().reset_index()
+        count_df.columns = [x, 'count']  # Rename columns for clarity
+        fig = px.bar(count_df, x=x, y='count')
     return fig
 
 # Callback for running the analysis (PCA or Linear Regression)
