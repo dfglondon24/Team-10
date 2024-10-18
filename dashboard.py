@@ -4,6 +4,7 @@ import webbrowser
 import plotly.graph_objects as go
 from dash import dcc, html
 from dash.dependencies import Input, Output, State
+from sklearn.linear_model import LassoCV
 import statsmodels.api as sm
 from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.preprocessing import StandardScaler
@@ -22,7 +23,6 @@ app = dash.Dash(__name__)
 app.layout = html.Div([
     # Title
     html.H1("Afri Kids Data Visualizer and Analysis Tool",style={'textAlign': 'center'}),
-
     # File uploader (if you want to make it dynamic)
     # dcc.Upload(id='upload-data', children=html.Button('Upload CSV')),
 
@@ -54,14 +54,6 @@ app.layout = html.Div([
 
     # Dropdown for analysis (PCA or Linear Regression)
     html.Label('Choose Analysis:'),
-    dcc.Dropdown(
-        id='analysis-type',
-        options=[
-            {'label': 'Linear Regression', 'value': 'linear'},
-            {'label': 'PCA', 'value': 'pca'}
-        ],
-        value='linear'  # Default value
-    ),
 
     # Plot area
     dcc.Graph(id='graph-output'),
@@ -77,11 +69,25 @@ app.layout = html.Div([
         options=[{'label': col, 'value': col} for col in df.columns],
         multi=False,
         value=df.columns[0]  # Default to first two columns
-    ),dcc.Graph(id='graph-output2'),
+    ),dcc.Graph(id='graph-output2'),dcc.Dropdown(
+        id='analysis-type',
+        options=[
+            {'label': 'Linear Regression', 'value': 'linear'},
+            {'label': 'PCA', 'value': 'pca'},{'label': 'Lasso', 'value': 'lasso'},
+        ],
+        value='linear'  # Default value
+    ),
     # Analysis output area,
 # Button to trigger the analysis
     html.Button('Run Analysis', id='run-analysis', n_clicks=0,style={'textAlign': 'center'}),
-    html.Div(id='analysis-output',style={'textAlign': 'center'}),
+    html.Div(id='analysis-output',style={'textAlign': 'center'}),dash_table.DataTable(
+        id='table',
+        columns=[{'name': col, 'id': col} for col in df.columns],
+        data=df.to_dict('records'),
+        sort_action='native',  # Enables sorting on column headers
+        sort_mode='multi',  # Allows sorting by multiple columns
+        page_size=10  # Display 10 rows per page
+    ),
 
 
 ])
@@ -119,8 +125,6 @@ def update_graph_correl(multi_feature):
     # Create heatmap using Plotly
     fig = go.Figure(data=go.Heatmap(
         z=corr_matrix.values,
-        x=corr_matrix.columns,
-        y=corr_matrix.index,
         colorscale='Viridis'
     ))
 
@@ -256,6 +260,38 @@ def run_analysis(n_clicks, analysis_type, selected_feature,y_selector):
             style_header={'fontWeight': 'bold'},
             style_cell={'textAlign': 'center'}
         )])
+    elif analysis_type == 'lasso':
+
+        # Import LassoCV from sklearn
+        from sklearn.linear_model import LassoCV
+
+        # Add a constant term for the intercept in the model
+        X_with_const = sm.add_constant(X_normalized)
+
+        # Perform LassoCV
+        lasso_cv = LassoCV(cv=5, random_state=0).fit(X_normalized, y_aligned)
+
+        # Get coefficients, including the intercept
+        coefficients = np.append(lasso_cv.intercept_, lasso_cv.coef_)
+
+        # Create DataFrame for the LassoCV results
+        coef_df = pd.DataFrame({
+            'columns names': ['Intercept'] + X_processed.columns.tolist(),
+            'coefficients': coefficients
+        })
+
+        # Display results
+        return html.Div([
+            html.H3(f"Optimal alpha: {lasso_cv.alpha_} | R²: {lasso_cv.score(X_normalized, y_aligned)}",
+                    style={'textAlign': 'center'}),
+            dash_table.DataTable(
+                columns=[{"name": i, "id": i} for i in coef_df.columns],
+                data=coef_df.to_dict('records'),
+                style_table={'width': '50%', 'margin': 'auto'},
+                style_header={'fontWeight': 'bold'},
+                style_cell={'textAlign': 'center'}
+            )
+        ])
 # Run the app
 if __name__ == '__main__':
     port = 8052  # Change to a different port
